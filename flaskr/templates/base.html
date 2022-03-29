@@ -1,0 +1,28 @@
+<!doctype html>
+<title>Cloud Computing Coursework</title>
+<link ref="stylesheet" href={{ url_for('static', filename = 'style.css') }} />
+<nav>
+  <h1>
+    Menu
+  </h1>
+  
+  <ul>
+     <li>
+         <a href={{ url_for('main.initialize')}}> Resource Management </a>
+         <a href={{ url_for('main.parameters')}}> Simulation Parameters </a>
+         <a href={{ url_for('main.output_dashboard')}}> Output </a>
+         <a href={{ url_for('main.audit_dashboard')}}> Audit </a>     
+     </li>
+  </ul>
+</nav>
+
+<section class="content">
+ <header>
+   {% block header %} {% endblock %}
+ </header>
+ 
+   {% for message in get_flashed_messages() %}
+     <div class="flash"> {{message}} </div>
+   {% endfor %}
+   {% block content %} {% endblock %}
+</section>
