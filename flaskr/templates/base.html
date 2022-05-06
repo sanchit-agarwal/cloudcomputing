@@ -19,6 +19,9 @@
 <section class="content">
  <header>
    {% block header %} {% endblock %}
+   <form action="/terminate" method="post">
+     <input type="submit" value="Terminate Resources" />
+   </form>
  </header>
  
    {% for message in get_flashed_messages() %}
