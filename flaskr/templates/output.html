@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block header %}
+  <h1> Simulation Parameters </h1>
+{% endblock %}
+
+{% block content %}
+
+ <h3> 99%  </h3>
+
+ {% for var99 in var99s %}
+ 
+   <p class="body">{{ var99 }}</p>
+ 
+ {% endfor %}
+ 
+ <h3> 95%  </h3>
+ 
+ {% for var95 in var95s %}
+ 
+   <p class="body">{{ var95 }}</p>
+ 
+ {% endfor %}
+
+{% endblock %}
