@@ -7,31 +7,29 @@
 {% block content %}
 
  <form id="initalize_resources" method="post" action="/simulate">
-    <!--<div class="rendered-form">
-    <div class="formbuilder-radio-group form-group field-resource-type">
-        <label for="resource-type" class="formbuilder-radio-group-label">Resource Type<span class="formbuilder-required"></span><span class="tooltip-element" tooltip="Resource Type">?</span></label>
+  <div class="rendered-form">
+    <div class="formbuilder-text form-group field-price_history">
+        <label for="price_history" class="formbuilder-text-label">Price History<span class="formbuilder-required"></span></label>
+        <input type="text" class="form-control" name="price_history" access="false" id="price_history" required="required" aria-required="true">
+    </div>
+    <div class="formbuilder-text form-group field-shots">
+        <label for="shots" class="formbuilder-text-label">No of Shots<span class="formbuilder-required"></span></label>
+        <input type="text" class="form-control" name="shots" access="false" id="shots" required="required" aria-required="true">
+    </div>
+    <div class="formbuilder-radio-group form-group field-trading_signal">
+        <label for="trading_signal" class="formbuilder-radio-group-label">Trading Signal Type</label>
         <div class="radio-group">
             <div class="formbuilder-radio">
-                <input name="resource-type" access="false" id="resource-type-0" required="required" aria-required="true" value="lambda" type="radio">
-                <label for="resource-type-0">Lambda</label>
+                <input name="trading_signal" access="false" id="trading_signal-0" value="buy" type="radio">
+                <label for="trading_signal-0">Buy</label>
             </div>
             <div class="formbuilder-radio">
-                <input name="resource-type" access="false" id="resource-type-1" required="required" aria-required="true" value="ec2" type="radio">
-                <label for="resource-type-1">EC2</label>
+                <input name="trading_signal" access="false" id="trading_signal-1" value="sell" type="radio">
+                <label for="trading_signal-1">Sell</label>
             </div>
-            <div class="formbuilder-radio">
-                <input name="resource-type" access="false" id="resource-type-2" required="required" aria-required="true" value="ecs" type="radio">
-                <label for="resource-type-2">ECS</label>
-            </div>
-          </div>
         </div>
-     </div>
-    <div class="rendered-form">
-   <div class="formbuilder-text form-group field-no_of_resources">
-        <label for="no_of_resources" class="formbuilder-text-label">No of resources<span class="formbuilder-required"></span><span class="tooltip-element" tooltip="No of resources">?</span></label>
-        <input type="text" name="no_of_resources" access="false" id="no_of_resources" title="No of resources" required="required" aria-required="true">
     </div>
-   </div>-->
+ </div>
    
    <input type="submit" value="Start Simulation"/>
 

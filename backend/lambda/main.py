@@ -15,7 +15,7 @@ def initialize():
 	#https://en.wikipedia.org/wiki/GameStop_short_squeeze
 	today = date.today()
 	decadeAgo = today - timedelta(days=3652)
-	data = pdr.get_data_yahoo('GME', start=decadeAgo, end=today)
+	data = pdr.get_data_yahoo('TSLA', start=decadeAgo, end=today)
 	# Other symbols: TSLA – Tesla, AMZN – Amazon, NFLX – Netflix, BP.L – BP
 	# Add two columns to this to allow for Buy and Sell signals
 	# fill with zero
@@ -25,7 +25,7 @@ def initialize():
 	return data
 
 
-def monte_carlo_simulate():
+def monte_carlo_simulate(price_history, shots, trading_signal):
 	# Find the 4 different types of signals – uncomment print statements
 	# if you want to look at the data these pick out in some another way
 	
@@ -33,19 +33,19 @@ def monte_carlo_simulate():
 	    # Hammer
 	    realbody=math.fabs(data.Open[i]-data.Close[i])
 	    bodyprojection=0.3*math.fabs(data.Close[i]-data.Open[i])
-	    if data.High[i] >= data.Close[i] and data.High[i]-bodyprojection <= data.Close[i] and data.Close[i] > data.Open[i] and data.Open[i] > data.Low[i] and data.Open[i]-data.Low[i] > realbody:
+	    if data.High[i] >= data.Close[i] and data.High[i]-bodyprojection <= data.Close[i] and data.Close[i] > data.Open[i] and data.Open[i] > data.Low[i] and data.Open[i]-data.Low[i] > realbody and trading_signal=="buy":
 	    	data.at[data.index[i], 'Buy'] = 1
 		#print("H", data.Open[i], data.High[i], data.Low[i], data.Close[i])
 	    # Inverted Hammer
-	    if data.High[i] > data.Close[i] and data.High[i]-data.Close[i] > realbody and data.Close[i] > data.Open[i] and data.Open[i] >= data.Low[i] and data.Open[i] <= data.Low[i]+bodyprojection:
+	    if data.High[i] > data.Close[i] and data.High[i]-data.Close[i] > realbody and data.Close[i] > data.Open[i] and data.Open[i] >= data.Low[i] and data.Open[i] <= data.Low[i]+bodyprojection and trading_signal=="buy":
 	    	data.at[data.index[i], 'Buy'] = 1
 		#print("I", data.Open[i], data.High[i], data.Low[i], data.Close[i])
 	    # Hanging Man
-	    if data.High[i] >= data.Open[i] and data.High[i]-bodyprojection <= data.Open[i] and data.Open[i] > data.Close[i] and data.Close[i] > data.Low[i] and data.Close[i]-data.Low[i] > realbody:
+	    if data.High[i] >= data.Open[i] and data.High[i]-bodyprojection <= data.Open[i] and data.Open[i] > data.Close[i] and data.Close[i] > data.Low[i] and data.Close[i]-data.Low[i] > realbody and trading_signal=="sell":
 	    	data.at[data.index[i], 'Sell'] = 1
 		#print("M", data.Open[i], data.High[i], data.Low[i], data.Close[i])
 	    # Shooting Star
-	    if data.High[i] > data.Open[i] and data.High[i]-data.Open[i] > realbody and data.Open[i] > data.Close[i] and data.Close[i] >= data.Low[i] and data.Close[i] <= data.Low[i]+bodyprojection:
+	    if data.High[i] > data.Open[i] and data.High[i]-data.Open[i] > realbody and data.Open[i] > data.Close[i] and data.Close[i] >= data.Low[i] and data.Close[i] <= data.Low[i]+bodyprojection and trading_signal=="sell":
 	    	data.at[data.index[i], 'Sell'] = 1
 		#print("S", data.Open[i], data.High[i], data.Low[i], data.Close[i])
 
@@ -53,18 +53,17 @@ def monte_carlo_simulate():
 	# Now have signals, so if they have the minimum amount of historic data can generate
 	# the number of simulated values (shots) needed in line with the mean and standard
 	# deviation of the that recent history
-	minhistory = 101
-	shots = 80000
+	
 	var95_list = []
 	var99_list = []
 
 
-	for i in range(minhistory, len(data)):
+	for i in range(price_history, len(data)):
 	    # if we were only interested in Buy signals
 	    if data.Buy[i]==1: 
 	    
-		       mean=data.Close[i-minhistory:i].pct_change(1).mean()
-		       std=data.Close[i-minhistory:i].pct_change(1).std()
+		       mean=data.Close[i-price_history:i].pct_change(1).mean()
+		       std=data.Close[i-price_history:i].pct_change(1).std()
 		       
 		       # generate rather larger (simulated) series with same broad characteristics
 		       simulated = [random.gauss(mean,std) for x in range(shots)]
@@ -86,7 +85,14 @@ def monte_carlo_simulate():
                
                
 def lambda_handler(event, context):
-	var95s, var99s = monte_carlo_simulate()
+
+	price_history = int(event["price_history"])
+	shots = int(event["shots"])
+	trading_signal = event["trading_signal"]
+
+
+
+	var95s, var99s = monte_carlo_simulate(price_history, shots, trading_signal)
 	print(var95s)
 	print(var99s)
 	return {
