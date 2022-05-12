@@ -3,16 +3,26 @@ import boto3
 import json
 import botocore
 from flask_executor import Executor
+import math
+import random
+import yfinance as yf
+import pandas as pd
+from datetime import date, timedelta
+from pandas_datareader import data as pdr
+from io import BytesIO
 
 
 bp = Blueprint('main', __name__)
 var95s = [] 
 var99s = []
-lambda_function_name = "LambdaCore"
+lambda_function_name = "lambdacore"
 no_of_resources = None
-
+resource_type = None
+emr_clusterid = None
 
 cfg = botocore.config.Config(retries={'max_attempts': 0}, read_timeout=900, connect_timeout=900, region_name="us-east-1" )
+
+lambda_client = boto3.client("lambda", config=cfg)
 
 
 @bp.route('/')
@@ -57,69 +67,182 @@ async def simulate():
 	
 	return "Success"
 	
+
+
+def write_to_s3(data):
+	s3 = boto3.client('s3')
 	
+	s3buffer = BytesIO()
+	
+	data.to_csv(s3buffer)
+	
+	response = s3.put_object(Bucket="cloudcomputingcw", Key="input/trading_signal.csv", Body=s3buffer.getvalue())
+	
+	print(response)
+
+def get_trading_signals(trading_signal):
+	
+	yf.pdr_override()
+	today = date.today()
+	decadeAgo = today - timedelta(days=3652)
+	data = pdr.get_data_yahoo('TSLA', start=decadeAgo, end=today)
+	data['IsSignal']=0
+	data['Date'] = data.index
+	
+	for i in range(len(data)):
+	
+		 # Hammer
+		 realbody=math.fabs(data.Open[i]-data.Close[i])
+		 bodyprojection=0.3*math.fabs(data.Close[i]-data.Open[i])
+		 
+		 if data.High[i] >= data.Close[i] and data.High[i]-bodyprojection <= data.Close[i] and data.Close[i] > data.Open[i] and data.Open[i] > data.Low[i] and data.Open[i]-data.Low[i] > realbody and trading_signal == "buy":
+			 data.at[data.index[i], 'IsSignal'] = 1
+			 #print("H", data.Open[i], data.High[i], data.Low[i], data.Close[i])
+		 
+		 # Inverted Hammer
+		 if data.High[i] > data.Close[i] and data.High[i]-data.Close[i] > realbody and data.Close[i] > data.Open[i] and data.Open[i] >= data.Low[i] and data.Open[i] <= data.Low[i]+bodyprojection and trading_signal == "buy":
+		 	data.at[data.index[i], 'IsSignal'] = 1
+			#print("I", data.Open[i], data.High[i], data.Low[i], data.Close[i])
+			
+		 # Hanging Man
+		 if data.High[i] >= data.Open[i] and data.High[i]-bodyprojection <= data.Open[i] and data.Open[i] > data.Close[i] and data.Close[i] > data.Low[i] and data.Close[i]-data.Low[i] > realbody and trading_signal == "sell":
+			 data.at[data.index[i], 'IsSignal'] = 1
+			 #print("M", data.Open[i], data.High[i], data.Low[i], data.Close[i])
+			 
+		 
+		 # Shooting Star
+		 if data.High[i] > data.Open[i] and data.High[i]-data.Open[i] > realbody and data.Open[i] > data.Close[i] and data.Close[i] >= data.Low[i] and data.Close[i] <= data.Low[i]+bodyprojection and trading_signal == "sell":
+			 data.at[data.index[i], 'IsSignal'] = 1
+			 #print("S", data.Open[i], data.High[i], data.Low[i], data.Close[i])
+		    
+	return data
+
+
+def get_trading_signals_emr(trading_signal, price_history):
+	
+	yf.pdr_override()
+	today = date.today()
+	decadeAgo = today - timedelta(days=3652)
+	data = pdr.get_data_yahoo('TSLA', start=decadeAgo, end=today)
+	data['IsSignal']=0
+	data['Date'] = data.index
+	
+	output_df = pd.DataFrame(columns=["Date", "Std", "Mean"])
+	index = 0
+	
+	for i in range(len(data)):
+	
+		
+		realbody=math.fabs(data.Open[i]-data.Close[i])
+		bodyprojection=0.3*math.fabs(data.Close[i]-data.Open[i])
+
+		if ((data.High[i] >= data.Close[i] and data.High[i]-bodyprojection <= data.Close[i] and data.Close[i] > data.Open[i] and data.Open[i] > data.Low[i] and data.Open[i]-data.Low[i] > realbody and trading_signal == "buy") or \
+	
+		   (data.High[i] > data.Close[i] and data.High[i]-data.Close[i] > realbody and data.Close[i] > data.Open[i] and data.Open[i] >= data.Low[i] and data.Open[i] <= data.Low[i]+bodyprojection and trading_signal == "buy") or \
+			
+                  (data.High[i] >= data.Open[i] and data.High[i]-bodyprojection <= data.Open[i] and data.Open[i] > data.Close[i] and data.Close[i] > data.Low[i] and data.Close[i]-data.Low[i] > realbody and trading_signal == "sell") or \
+		
+		  (data.High[i] > data.Open[i] and data.High[i]-data.Open[i] > realbody and data.Open[i] > data.Close[i] and data.Close[i] >= data.Low[i] and data.Close[i] <= data.Low[i]+bodyprojection and trading_signal == "sell")):
+		  
+			std = data.Close[i-price_history:i].pct_change(1).std()
+			mean = data.Close[i-price_history:i].pct_change(1).mean()
+			output_df.loc[index] = [data.at[data.index[i], "Date"], std if not math.isnan(std) else 0.0 , mean if not math.isnan(mean) else 0.0 ]
+			index += 1
+			
+		
+	return output_df
+
+
+async def listen_output_data():
+	s3_client = boto3.client("s3")
+	while True:
+		response = s3_client.get_object(Bucket="cloudcomputingcw", Key="")
+	
+	
+
 	
 def start_simulation(price_history, shots, trading_signal):
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-	#Lambda
-	#TODO check for "pending" event
-	lambda_client = boto3.client("lambda", config=cfg)
-
-	lambda_url = lambda_client.list_function_url_configs(FunctionName=lambda_function_name)
+	global resource_type
 	
-	executor = Executor(current_app)
-	global no_of_resources	
-	no_of_resources = no_of_resources if no_of_resources != None else 3
 	
-	futures = executor.map(send_lambda_request, [lambda_url] * no_of_resources, [price_history] * no_of_resources, [shots] * no_of_resources, [trading_signal] * no_of_resources)
+	trading_signals = get_trading_signals_emr(trading_signal, int(price_history))
+	#trading_signals = trading_signals[["Date", "Close", "IsSignal", "Std", "Mean"]]
+	#trading_signals.reset_index(drop=True, inplace=True)
+	
+	
+	if resource_type == "lambda" or resource_type==None:
+		#Lambda
+		#lambda_client = boto3.client("lambda", config=cfg)
+
+		#lambda_url = lambda_client.list_function_url_configs(FunctionName=lambda_function_name)
 		
-	for response in futures:
-		print(response)
+		executor = Executor(current_app)
+		global no_of_resources	
+		no_of_resources = no_of_resources if no_of_resources != None else 3
+		
+		futures = executor.map(send_lambda_request, [price_history] * no_of_resources, [shots] * no_of_resources, [trading_signals] * no_of_resources)
+			
+		for response in futures:
+			print(response["Payload"].read())
+	
+	else:
+		#EMR 
+		emr_client = boto3.client('emr')
+		
+		write_to_s3(trading_signals)
+		
+		Steps=[
+			{
+			    'Name': 'main',
+			    'ActionOnFailure': 'TERMINATE_CLUSTER',
+			    'HadoopJarStep': {
+				'Jar': 'command-runner.jar',
+				'Args': ["spark-submit","--deploy-mode","cluster","--master","yarn","--deploy-mode","cluster","--conf","spark.executorEnv.YARN_CONTAINER_RUNTIME_TYPE=docker","--							conf","spark.executorEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=580126642516.dkr.ecr.us-east-1.amazonaws.com/emrcore:0.2","--conf","spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_TYPE=docker","--conf","spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=580126642516.dkr.ecr.us-east-1.amazonaws.com/emrcore:0.2","s3://cloudcomputingcw/emr/main.py","command-runner.jar"]
+			    }
+			},
+		]
+		
+		global emr_clusterid
+		
+		#response = emr_client.add_job_flow_steps(
+   		#	 JobFlowId= emr_clusterid,
+   		#	 Steps=Steps)
+		
+		#print(response)
 	
 	
 	print("Its done")
-	return 0
 	
-def send_lambda_request(url, price_history, shots, trading_signal):
-	lambda_client = boto3.client("lambda", config=cfg)
+def send_lambda_request(price_history, shots, trading_signals):
+	
+	
+	global lambda_function_name
+	
 	payload = {
 	   "price_history": price_history,
 	   "shots": shots,
-	   "trading_signal": trading_signal
+	   "data": trading_signals.to_json()
 	}
 	
-	response = lambda_client.invoke(FunctionName=lambda_function_name,InvocationType='Event', Payload=json.dumps(payload).encode('utf-8'))
-	print(response)
+	response = lambda_client.invoke(FunctionName=lambda_function_name,InvocationType='RequestResponse', Payload=json.dumps(payload).encode('utf-8'))
 	return response
 	
 	
 @bp.route("/initialize", methods=["POST"])
 def initialize_form():
-	resource_type = request.form["resource-type"]
+	global resource_type
 	global no_of_resources
+	resource_type = request.form["resource-type"]
 	
 	no_of_resources = int(request.form["no_of_resources"])
 	
 	print(resource_type)
 	print(no_of_resources)
 	
-	create_lambda()	
+	if resource_type == "lambda":
+		create_lambda()
+	elif resource_type == "emr":
+		create_emr(no_of_resources)
 	
 	return render_template("/initialize.html")
 		
@@ -130,58 +253,78 @@ def create_lambda():
 	response = lambda_client.create_function(
 	  FunctionName = lambda_function_name,
 	  Role = "arn:aws:iam::580126642516:role/LabRole",
-	  Code = dict(ImageUri="580126642516.dkr.ecr.us-east-1.amazonaws.com/lambda_core:1.0"),
+	  Code = dict(ImageUri="580126642516.dkr.ecr.us-east-1.amazonaws.com/lambdacore:1.0"),
 	  PackageType = "Image",
 	  Timeout = 360)
 		
 	print(response)
 
 
+def get_emr_status():
+	emr_client = boto3.client('emr')
+	
+	cluster = client.list_clusters(ClusterStates=["Running"])
+	
+	#Assert only one cluster
+	return cluster["Clusters"][0]["Id"]
+
 
 def create_emr(no_of_resources):
 
 	emr_client = boto3.client('emr')
 	instance_groups = []
-	instance_groups.append(InstanceGroup(
-	    num_instance=1,
-	    role="MASTER",
-	    type="m4.large",
-	    market="ON_DEMAND",
-	    name="Master Node"
-	))
-	instance_groups.append(InstanceGroup(
-	    num_instance=no_of_resources-1,
-	    role="CORE",
-	    type="m4.large",
-	    market="ON_DEMAND",
-	    name="Worker Node"
-	))
+	instance_groups.append({
+                'Name': 'master_node',
+                'Market': 'ON_DEMAND',
+                'InstanceRole': 'MASTER',
+                'InstanceType': 'm4.large',
+                'InstanceCount': 1,
+                
+        })
 		
+	instance_groups.append({
+                'Name': 'worker_node',
+                'Market': 'ON_DEMAND',
+                'InstanceRole': 'CORE',
+                'InstanceType': 'm4.large',
+                'InstanceCount': no_of_resources - 1,
+                
+         })
+		
+	emr_configuration = [{
+		"Classification":"container-executor",
+		 "Properties":{}, 
+		 "Configurations":
+		 	[{"Classification":"docker", "Properties":
+		 	       {"docker.privileged-containers.registries":"local,centos,580126642516.dkr.ecr.us-east-1.amazonaws.com", 
+		 	        "docker.trusted.registries":"local,centos,580126642516.dkr.ecr.us-east-1.amazonaws.com"},
+		          "Configurations":[]}]
+	}]
 	
 	
-	clusterid = emr_client.run_job_flow(
-	      "Trading Risk Simulation",
-	      instance_groups = instance_groups,
-	      action_on_failure="TERMINATE_CLUSTER",
-	      log_uri = "s3://cloudcomputingcw/emr/logs/",
-	      Steps = [
-	          {
-	             "Name": "Step 1",
-	             "ActionOnFailure": "TERMINATE_CLUSTER",
-	             "HadoopJarStep": {
-	                 "Args": [
-	                      "spark-submit",
-	                      "--deploy-mode", "cluster",
-	                      "--archives", "s3://cloudcomputingcw/emr/env.zip",
-                              "s3://cloudcomputingcw/emr/main.py"
-	                 ],
-	                 "Jar": "command-runner.jar"
-	             }
-	          }
-	       ]) 
+	 
+	global emr_clusterid
 	
 	
-	print(clusterid)
+	emr_clusterid = emr_client.run_job_flow(
+	      Name = "trading_risk_simulator_emrcluster",
+	      Instances = {
+	         "InstanceGroups": instance_groups,
+	         "KeepJobFlowAliveWhenNoSteps": True
+	      },
+	      LogUri = "s3://cloudcomputingcw/emr/logs/",
+	      Configurations = emr_configuration,
+	      ServiceRole="EMR_DefaultRole",
+	      JobFlowRole="EMR_EC2_DefaultRole",
+	      ReleaseLabel="emr-6.6.0")
+	     
+	      
+	
+	print("EMR Startup Done!!")
+	print(emr_clusterid)
+	
+	emr_clusterid = emr_clusterid["JobFlowId"]
+	
 	
 	
 	
