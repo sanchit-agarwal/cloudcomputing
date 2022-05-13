@@ -10,6 +10,8 @@ import pandas as pd
 from datetime import date, timedelta
 from pandas_datareader import data as pdr
 from io import BytesIO
+from threading import Thread
+import time
 
 
 bp = Blueprint('main', __name__)
@@ -51,21 +53,16 @@ def terminate():
 	
 	
 @bp.route("/simulate", methods=["POST"])
-async def simulate():
+def simulate():
 	price_history = request.form["price_history"]
 	shots = request.form["shots"]
 	trading_signal = request.form["trading_signal"]
 
-
-	print(price_history)
-	print(shots)
-	print(trading_signal)
-
-	await start_simulation(price_history, shots, trading_signal)
+	start_simulation(price_history, shots, trading_signal)
 	#create_emr()
 	
 	
-	return "Success"
+	return render_template("/parameters.html")
 	
 
 
@@ -153,31 +150,60 @@ def get_trading_signals_emr(trading_signal, price_history):
 	return output_df
 
 
-async def listen_output_data():
+def listen_output_data():
 	s3_client = boto3.client("s3")
+	output_key = None
+	payload = None
 	while True:
-		response = s3_client.get_object(Bucket="cloudcomputingcw", Key="")
+		response = s3_client.list_objects_v2(Bucket="cloudcomputingcw", Prefix="output/")
+		#print(response)
+		
+		if "Contents" in response:
+		
+			contents = response["Contents"]
+			
+			for content in contents:
+			
+				key = content["Key"].lower()
+				
+				if "success" in key:
+					continue
+					
+				output_key = content["Key"] 
+
+				response = s3_client.get_object(Bucket="cloudcomputingcw", Key=key)
+				payload = response["Body"].read()
+				
+				payload = pd.read_csv(BytesIO(payload))
+				
+				print(payload)
+				print("Data captured")
+				break
+			 
+		else:
+			print("Not yet")
+			time.sleep(5)
 	
-	
+			
 
 	
 def start_simulation(price_history, shots, trading_signal):
 	global resource_type
 	
-	
-	trading_signals = get_trading_signals_emr(trading_signal, int(price_history))
-	#trading_signals = trading_signals[["Date", "Close", "IsSignal", "Std", "Mean"]]
-	#trading_signals.reset_index(drop=True, inplace=True)
+	emr_clusterid = get_emr_status()
 	
 	
-	if resource_type == "lambda" or resource_type==None:
+	if ((resource_type == "lambda" or resource_type==None) and emr_clusterid == None):
 		#Lambda
-		#lambda_client = boto3.client("lambda", config=cfg)
-
-		#lambda_url = lambda_client.list_function_url_configs(FunctionName=lambda_function_name)
 		
+		trading_signals = get_trading_signals(trading_signal)
+		trading_signals = trading_signals[["Date", "Close", "IsSignal", "Std", "Mean"]]
+		trading_signals.reset_index(drop=True, inplace=True)
+
 		executor = Executor(current_app)
+		
 		global no_of_resources	
+		
 		no_of_resources = no_of_resources if no_of_resources != None else 3
 		
 		futures = executor.map(send_lambda_request, [price_history] * no_of_resources, [shots] * no_of_resources, [trading_signals] * no_of_resources)
@@ -187,6 +213,9 @@ def start_simulation(price_history, shots, trading_signal):
 	
 	else:
 		#EMR 
+		
+		trading_signals = get_trading_signals_emr(trading_signal, int(price_history))
+		
 		emr_client = boto3.client('emr')
 		
 		write_to_s3(trading_signals)
@@ -194,22 +223,24 @@ def start_simulation(price_history, shots, trading_signal):
 		Steps=[
 			{
 			    'Name': 'main',
-			    'ActionOnFailure': 'TERMINATE_CLUSTER',
+			    'ActionOnFailure': 'CONTINUE',
 			    'HadoopJarStep': {
 				'Jar': 'command-runner.jar',
-				'Args': ["spark-submit","--deploy-mode","cluster","--master","yarn","--deploy-mode","cluster","--conf","spark.executorEnv.YARN_CONTAINER_RUNTIME_TYPE=docker","--							conf","spark.executorEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=580126642516.dkr.ecr.us-east-1.amazonaws.com/emrcore:0.2","--conf","spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_TYPE=docker","--conf","spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=580126642516.dkr.ecr.us-east-1.amazonaws.com/emrcore:0.2","s3://cloudcomputingcw/emr/main.py","command-runner.jar"]
+				'Args': ["spark-submit","--deploy-mode","cluster", "s3://cloudcomputingcw/emr/main.py", shots]
 			    }
 			},
 		]
 		
-		global emr_clusterid
 		
-		#response = emr_client.add_job_flow_steps(
-   		#	 JobFlowId= emr_clusterid,
-   		#	 Steps=Steps)
 		
-		#print(response)
+		response = emr_client.add_job_flow_steps(
+   			 JobFlowId= emr_clusterid,
+   			 Steps=Steps)
+		
+		print(response)
 	
+	listener_thread = Thread(target=listen_output_data)
+	listener_thread.start()
 	
 	print("Its done")
 	
@@ -263,10 +294,10 @@ def create_lambda():
 def get_emr_status():
 	emr_client = boto3.client('emr')
 	
-	cluster = client.list_clusters(ClusterStates=["Running"])
+	cluster = emr_client.list_clusters(ClusterStates=["WAITING","RUNNING"])
 	
 	#Assert only one cluster
-	return cluster["Clusters"][0]["Id"]
+	return cluster["Clusters"][0]["Id"] if len(cluster["Clusters"]) != 0 else None
 
 
 def create_emr(no_of_resources):
@@ -291,17 +322,6 @@ def create_emr(no_of_resources):
                 
          })
 		
-	emr_configuration = [{
-		"Classification":"container-executor",
-		 "Properties":{}, 
-		 "Configurations":
-		 	[{"Classification":"docker", "Properties":
-		 	       {"docker.privileged-containers.registries":"local,centos,580126642516.dkr.ecr.us-east-1.amazonaws.com", 
-		 	        "docker.trusted.registries":"local,centos,580126642516.dkr.ecr.us-east-1.amazonaws.com"},
-		          "Configurations":[]}]
-	}]
-	
-	
 	 
 	global emr_clusterid
 	
@@ -312,11 +332,16 @@ def create_emr(no_of_resources):
 	         "InstanceGroups": instance_groups,
 	         "KeepJobFlowAliveWhenNoSteps": True
 	      },
-	      LogUri = "s3://cloudcomputingcw/emr/logs/",
-	      Configurations = emr_configuration,
+	      LogUri = "s3://cloudcomputingcw/emr/logs",
 	      ServiceRole="EMR_DefaultRole",
 	      JobFlowRole="EMR_EC2_DefaultRole",
-	      ReleaseLabel="emr-6.6.0")
+	      ReleaseLabel="emr-6.6.0",
+	      Applications= [{
+	         Name:"Spark",
+	         Version: "3.2.0"
+	      
+	      
+	      }])
 	     
 	      
 	
