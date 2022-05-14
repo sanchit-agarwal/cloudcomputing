@@ -7,6 +7,7 @@ def lambda_handler(event, context):
     data = pd.read_json(event["data"])
     shots = int(event["shots"])
     price_history = int(event["price_history"])
+    lambda_id = int(event["lambda_id"])
 
     output_df = pd.DataFrame(columns=["Date", "var95", "var99"])
     index = 0 
@@ -24,9 +25,8 @@ def lambda_handler(event, context):
             output_df.loc[index] = [data.Date[i], var95, var99]
             index += 1
     
-    payload = {
-      "Status":0, 
-      "Data": output_df.to_json()
-    }
+    output_df.to_csv("s3://cloudcomputingcw/output/output_{0}".format(lambda_id) + ".csv")
     
-    return json.dumps(payload).encode('utf-8')
+    return {
+      "status": "OK"
+    }

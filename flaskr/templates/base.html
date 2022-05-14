@@ -1,31 +1,63 @@
 <!doctype html>
 <title>Cloud Computing Coursework</title>
-<link ref="stylesheet" href={{ url_for('static', filename = 'style.css') }} />
-<nav>
-  <h1>
-    Menu
-  </h1>
-  
-  <ul>
-     <li>
-         <a href={{ url_for('main.initialize')}}> Resource Management </a>
-         <a href={{ url_for('main.parameters')}}> Simulation Parameters </a>
-         <a href={{ url_for('main.output_dashboard')}}> Output </a>
-         <a href={{ url_for('main.audit_dashboard')}}> Audit </a>     
-     </li>
-  </ul>
-</nav>
+<link rel="stylesheet" href="//fonts.googleapis.com/icon?family=Material+Icons">
+<link href='https://fonts.which is googleapis.com/css?family=Roboto:400,300,300italic,500,400italic,700,700italic' rel='stylesheet' type='text/css'>
+<link rel="stylesheet" href="//storage.googleapis.com/code.getmdl.io/1.0.1/material.teal-red.min.css" />
+<script src="//storage.googleapis.com/code.getmdl.io/1.0.1/material.min.js"></script>
 
-<section class="content">
- <header>
-   {% block header %} {% endblock %}
-   <form action="/terminate" method="post">
-     <input type="submit" value="Terminate Resources" />
-   </form>
- </header>
- 
-   {% for message in get_flashed_messages() %}
-     <div class="flash"> {{message}} </div>
-   {% endfor %}
-   {% block content %} {% endblock %}
-</section>
+
+
+
+
+<!--  https://webdesign.tutsplus.com/tutorials/learning-material-design-lite-navigation--cms-24565  -->
+
+
+
+
+
+	<div class="mdl-layout mdl-js-layout mdl-layout--fixed-header">
+	  <header class="mdl-layout__header">
+	    <div class="mdl-layout__header-row">
+	      <span class="mdl-layout-title">Trading Signal Risk Analysis</span>
+	      <div class="mdl-layout-spacer"></div>
+	      <nav class="mdl-navigation">
+		<a class="mdl-navigation__link" href={{ url_for('main.initialize')}}> Resource Management</a>
+		 <a class="mdl-navigation__link" href={{ url_for('main.parameters')}}>Simulation Parameters</a>
+		 <a class="mdl-navigation__link" href={{ url_for('main.output_dashboard')}}> Output </a>
+		<a class="mdl-navigation__link" href={{ url_for('main.audit_dashboard')}}> Audit  </a>    
+	      </nav>
+	    </div>
+	  </header>
+	  <div class="mdl-layout__drawer">
+	    <span class="mdl-layout-title">Trading Signal Risk Analysis</span>
+	    <nav class="mdl-navigation">
+		  <a class="mdl-navigation__link" href={{ url_for('main.initialize')}}> Resource Management</a>
+		  <a class="mdl-navigation__link" href={{ url_for('main.parameters')}}>Simulation Parameters</a>
+		  <a class="mdl-navigation__link" href={{ url_for('main.output_dashboard')}}> Output </a>
+		  <a class="mdl-navigation__link" href={{ url_for('main.audit_dashboard')}}> Audit  </a>   
+	    </nav>
+	  </div>
+	  
+	   <div>
+		<section>
+		 <header>
+		   {% block header %} {% endblock %}
+		   <form action="/terminate" method="post">
+		     <input type="submit" value="Terminate Resources" />
+		   </form>
+		 </header>
+		 
+		   {% for message in get_flashed_messages() %}
+		     <div class="flash"> {{message}} </div>
+		   {% endfor %}
+		   {% block content %} {% endblock %}
+		</section>
+        </div>
+	  
+	  
+	  
+	  
+	  </div>
+
+     
+

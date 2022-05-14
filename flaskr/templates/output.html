@@ -1,25 +1,53 @@
 {% extends "base.html" %}
 
 {% block header %}
-  <h1> Simulation Parameters </h1>
+  <h1> Output </h1>
 {% endblock %}
 
 {% block content %}
 
- <h3> 99%  </h3>
 
- {% for var99 in var99s %}
- 
-   <p class="body">{{ var99 }}</p>
- 
- {% endfor %}
- 
- <h3> 95%  </h3>
- 
- {% for var95 in var95s %}
- 
-   <p class="body">{{ var95 }}</p>
- 
- {% endfor %}
+ <!-- https://roytuts.com/google-pie-chart-using-python-flask/ 
+      https://developers.google.com/chart/interactive/docs/datatables_dataviews#emptytable
+      https://developers.google.com/chart/interactive/docs/gallery/table
+ -->
+
+ <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <script type="text/javascript">
+      google.charts.load("current", {packages:["corechart", "table"]});
+      google.charts.setOnLoadCallback(drawChart);
+      function drawChart() {
+        var data = new google.visualization.DataTable();
+       
+        data.addColumn("datetime", "Date")
+        data.addColumn("number", "95% Confidence")
+        data.addColumn("number", "99% Confidence")
+	data.addColumn("number", "Average 95% Confidence")
+	data.addColumn("number", "Average 99% Confidence")
+        
+        data.addRows([
+		{% for row in data %}
+			
+		[new Date("{{ row[0] }}"), {{ row[1] }}, {{ row[2] }}, {{ row[3] }}, {{ row[4] }}],
+			
+		{% endfor %}
+        ]);
+        
+        var table_view = new google.visualization.DataView(data);
+        table_view.setColumns([0,1,2]);
+
+        var chart = new google.visualization.LineChart(document.getElementById('linechart'));
+        
+        chart.draw(data, { title: 'Risk Values' });
+        
+        var table = new google.visualization.Table(document.getElementById('table_div'));
+
+        table.draw(table_view, {page: "enable", width: '100%', height: '100%'});
+      }
+    </script>
+    
+    
+    <div id="linechart" style="width: 900px; height: 500px;"></div>
+    <div id="table_div" style="width: 900px; height: 500px;"></div>
 
 {% endblock %}

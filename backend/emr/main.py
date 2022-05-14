@@ -1,75 +1,36 @@
 #!/usr/bin/env python3
 import random
-from datetime import date, timedelta
 from pyspark.sql import SparkSession
 import sys
 
 
+def get_risk_values(row):
 
+    std = float(row[2])
+    mean = float(row[3])
 
-price_history = int(sys.argv[1])
-shots = int(sys.argv[2])
-
-
-def get_risk_values(iterator):
-
-    for i in range(price_history, len(iterator)):
-
-        if int(iterator.IsSignal[i]) == 1: 
-
-            mean= iterator.Close[i-price_history:i].pct_change(1).mean()
-            std= iterator.Close[i-price_history:i].pct_change(1).std()
-
-            simulated = [random.gauss(mean,std) for x in range(shots)]
-
-            simulated.sort(reverse=True)
-            var95 = simulated[int(len(simulated)*0.95)]
-            var99 = simulated[int(len(simulated)*0.99)]
-            yield [iterator.Date[i], var95, var99]
+    simulated = [random.gauss(mean,std) for x in range(shots)]
+    simulated.sort(reverse=True)
+    
+    var95 = simulated[int(len(simulated)*0.95)]
+    var99 = simulated[int(len(simulated)*0.99)]
+    
+    return [row[1], var95, var99]
             
             
-#Create PySpark SparkSession
-with SparkSession.builder.appName("risk_simulator").getOrCreate() as spark:
-    sparkDF = spark.read.csv("s3://cloudcomputingcw/input/trading_signal.csv")
-
-    #TODO: Not parallelized
-    pandasDF = sparkDF.toPandas()
-    outputDF = pd.DataFrame(columns=["Date", "var95", "var99"])
-    
-    index = 0
-    
-    for i in range(price_history, len(pandasDF)):
-
-        if int(pandasDF.IsSignal[i]) == 1: 
-
-            mean= pandasDF.Close[i-price_history:i].pct_change(1).mean()
-            std= pandasDF.Close[i-price_history:i].pct_change(1).std()
-
-            simulated = [random.gauss(mean,std) for x in range(shots)]
-
-            simulated.sort(reverse=True)
-            var95 = simulated[int(len(simulated)*0.95)]
-            var99 = simulated[int(len(simulated)*0.99)]
             
-            outputDF.loc[index] = [pandasDF.Date[i], var95, var99]
-            index += 1
-            
+if __name__ == "__main__":
     
-    print(outputDF)
-    outputDF.to_csv("s3://cloudcomputingcw/output/output.csv")
+    shots = int(sys.argv[1])
     
+    #Create PySpark SparkSession
+    with SparkSession.builder.appName("risk_simulator").getOrCreate() as spark:
+        sparkDF = spark.read.option("header", True).csv("s3://cloudcomputingcw/input/trading_signal.csv")
+        
+        
+        outputRDD = sparkDF.rdd.map(get_risk_values)
+        outputDF = outputRDD.toDF()
+        
+        print(outputDF)
+        outputDF.repartition(1).write.mode("overwrite").option("header", "true").csv("s3://cloudcomputingcw/output")
     
-    
-    
-    
-    #outputDF = sparkDF.mapInPandas(get_risk_values, sparkDF.schema)
-    #outputDF.show()
-    
-    #output_df.to_csv("s3://cloudcomputingcw/output/output.csv")
-
-
-
-
-
-
-

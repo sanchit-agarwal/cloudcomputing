@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, current_app
+from flask import Blueprint, render_template, request, current_app, flash
 import boto3
 import json
 import botocore
@@ -12,6 +12,7 @@ from pandas_datareader import data as pdr
 from io import BytesIO
 from threading import Thread
 import time
+from statistics import mean
 
 
 bp = Blueprint('main', __name__)
@@ -35,19 +36,15 @@ def initialize():
 @bp.route('/terminate', methods=["POST"])
 def terminate():
 	
-	lambda_client = boto3.client("lambda")
-	forbiddens = ["LightsailMonitoringFunction", "MainMonitoringFunction"]
+	emr_clusterid = get_emr_status()
 	
-	#TODO: Check for functions > 50
-	lambda_functions = lambda_client.list_functions()
+	if emr_clusterid != None:
+		emr_client = boto3.client("emr")
+		emr_client.terminate_job_flows(JobFlowIds=[emr_clusterid])
+		print("EMR Cluster with JobFlow ID {0} tasked for termination".format(emr_clusterid))
 		
-	for lambda_function in lambda_functions["Functions"]:
-		name = lambda_function["FunctionName"]
-
-		if name in forbiddens:
-			continue
-
-		lambda_client.delete_function(FunctionName=name)
+	else:
+		flash("No EMR Cluster found")
 
 	return render_template("/initialize.html")
 	
@@ -143,20 +140,65 @@ def get_trading_signals_emr(trading_signal, price_history):
 		  
 			std = data.Close[i-price_history:i].pct_change(1).std()
 			mean = data.Close[i-price_history:i].pct_change(1).mean()
-			output_df.loc[index] = [data.at[data.index[i], "Date"], std if not math.isnan(std) else 0.0 , mean if not math.isnan(mean) else 0.0 ]
+			
+			#No use of such trading signal 
+			if math.isnan(std) or math.isnan(mean):
+				continue
+			
+			output_df.loc[index] = [data.at[data.index[i], "Date"], std, mean ]
 			index += 1
 			
 		
 	return output_df
+	
+	
+@bp.route("/reset", methods=["POST"])
+def reset():
+	reset_analysis()
+	return render_template("/parameters.html")
+
+def reset_analysis():
+	s3_client = boto3.client("s3")
+	
+	object_keys = []
+	
+	try:
+
+		response = s3_client.list_objects_v2(Bucket="cloudcomputingcw", Prefix="output/")
+		
+		#print(response)
+			
+		if "Contents" in response:
+			contents = response["Contents"]
+			for content in contents:
+				key = content["Key"].lower()				
+				output_key = content["Key"] 
+				object_keys.append(output_key)
+		
+		
+		delete = [{"Key": x} for x in object_keys]
+		
+		response = s3_client.delete_objects(Bucket="cloudcomputingcw", Delete={"Objects": delete})
+		#print(response)
+		print("{0} objects cleaned".format(len(object_keys)))
+		
+		
+	except botocore.exceptions.ClientError:
+		print("No Objects found in S3 bucket to delete")
 
 
 def listen_output_data():
 	s3_client = boto3.client("s3")
 	output_key = None
-	payload = None
-	while True:
+	csv_files = []
+	
+	#Taking into account that each resource might write CSV files at different times
+	unique_csv_files = set()
+	max_tries = 10
+	
+	
+	while max_tries != 0:
 		response = s3_client.list_objects_v2(Bucket="cloudcomputingcw", Prefix="output/")
-		#print(response)
 		
 		if "Contents" in response:
 		
@@ -164,27 +206,35 @@ def listen_output_data():
 			
 			for content in contents:
 			
-				key = content["Key"].lower()
+				output_key = content["Key"] 				
 				
-				if "success" in key:
+				if "success" in output_key.lower():
+					continue
+
+				
+				if output_key in unique_csv_files:
+					break_loop = True			
 					continue
 					
-				output_key = content["Key"] 
-
-				response = s3_client.get_object(Bucket="cloudcomputingcw", Key=key)
-				payload = response["Body"].read()
-				
-				payload = pd.read_csv(BytesIO(payload))
-				
-				print(payload)
-				print("Data captured")
-				break
-			 
+				else:
+					response = s3_client.get_object(Bucket="cloudcomputingcw", Key=output_key)
+					payload = response["Body"].read()
+					
+					payload = pd.read_csv(BytesIO(payload))
+					csv_files.append(payload)
+					
+					unique_csv_files.add(output_key)
+					print("{0} found in S3 Bucket. Adding....".format(output_key))
+					break_loop = False
+			
+			if break_loop:
+				max_tries -= 1
+				 
 		else:
-			print("Not yet")
+			print("No objects found in S3 Bucket yet")
 			time.sleep(5)
 	
-			
+	print("Read {0} objects".format(len(csv_files)))
 
 	
 def start_simulation(price_history, shots, trading_signal):
@@ -192,25 +242,37 @@ def start_simulation(price_history, shots, trading_signal):
 	
 	emr_clusterid = get_emr_status()
 	
+	global no_of_resources	
 	
+	if no_of_resources == None:
+			flash("No of Resources not defined. Please submit the Initalize form again")
+			print("No of resources not defined")
+			return
+			
+	
+	# Remove existing data
+	cleanup_thread = Thread(target=reset_analysis)
+	cleanup_thread.start()
+	
+	
+	if resource_type == "emr" and emr_clusterid == None:
+		flash("EMR Cluster still Initializing. Wait for some time and then try again")
+		return 
+	
+	# If EMR Cluster is up and running, then that will be preferred over Lambda
 	if ((resource_type == "lambda" or resource_type==None) and emr_clusterid == None):
 		#Lambda
 		
 		trading_signals = get_trading_signals(trading_signal)
-		trading_signals = trading_signals[["Date", "Close", "IsSignal", "Std", "Mean"]]
+		trading_signals = trading_signals[["Date", "Close", "IsSignal"]]
 		trading_signals.reset_index(drop=True, inplace=True)
 
 		executor = Executor(current_app)
 		
-		global no_of_resources	
+		lambda_ids = range(no_of_resources)
 		
-		no_of_resources = no_of_resources if no_of_resources != None else 3
-		
-		futures = executor.map(send_lambda_request, [price_history] * no_of_resources, [shots] * no_of_resources, [trading_signals] * no_of_resources)
+		executor.map(send_lambda_request, [price_history] * no_of_resources, [shots] * no_of_resources, [trading_signals] * no_of_resources, lambda_ids)
 			
-		for response in futures:
-			print(response["Payload"].read())
-	
 	else:
 		#EMR 
 		
@@ -226,7 +288,7 @@ def start_simulation(price_history, shots, trading_signal):
 			    'ActionOnFailure': 'CONTINUE',
 			    'HadoopJarStep': {
 				'Jar': 'command-runner.jar',
-				'Args': ["spark-submit","--deploy-mode","cluster", "s3://cloudcomputingcw/emr/main.py", shots]
+				'Args': ["spark-submit","--deploy-mode","cluster", "s3://cloudcomputingcw/emr/main.py", shots, str(no_of_resources)]
 			    }
 			},
 		]
@@ -239,23 +301,28 @@ def start_simulation(price_history, shots, trading_signal):
 		
 		print(response)
 	
+	
+	#Prevent Race Condition on Cleanup Thread with Listener Thread by waiting for CleanupThread to finish
+	cleanup_thread.join()
+	
 	listener_thread = Thread(target=listen_output_data)
 	listener_thread.start()
 	
 	print("Its done")
 	
-def send_lambda_request(price_history, shots, trading_signals):
-	
+def send_lambda_request(price_history, shots, trading_signals, lambda_id):
 	
 	global lambda_function_name
 	
 	payload = {
 	   "price_history": price_history,
 	   "shots": shots,
-	   "data": trading_signals.to_json()
+	   "data": trading_signals.to_json(),
+	   "lambda_id": lambda_id
 	}
 	
-	response = lambda_client.invoke(FunctionName=lambda_function_name,InvocationType='RequestResponse', Payload=json.dumps(payload).encode('utf-8'))
+	response = lambda_client.invoke(FunctionName=lambda_function_name,InvocationType='Event', Payload=json.dumps(payload).encode('utf-8'))
+	#print(response)
 	return response
 	
 	
@@ -270,9 +337,9 @@ def initialize_form():
 	print(resource_type)
 	print(no_of_resources)
 	
-	if resource_type == "lambda":
-		create_lambda()
-	elif resource_type == "emr":
+	#if resource_type == "lambda":
+		#create_lambda()
+	if resource_type == "emr":
 		create_emr(no_of_resources)
 	
 	return render_template("/initialize.html")
@@ -284,7 +351,7 @@ def create_lambda():
 	response = lambda_client.create_function(
 	  FunctionName = lambda_function_name,
 	  Role = "arn:aws:iam::580126642516:role/LabRole",
-	  Code = dict(ImageUri="580126642516.dkr.ecr.us-east-1.amazonaws.com/lambdacore:1.0"),
+	  Code = dict(ImageUri="580126642516.dkr.ecr.us-east-1.amazonaws.com/lambda_core:2.0"),
 	  PackageType = "Image",
 	  Timeout = 360)
 		
@@ -294,13 +361,19 @@ def create_lambda():
 def get_emr_status():
 	emr_client = boto3.client('emr')
 	
-	cluster = emr_client.list_clusters(ClusterStates=["WAITING","RUNNING"])
+	cluster = emr_client.list_clusters(ClusterStates=["WAITING","RUNNING","STARTING"])
 	
 	#Assert only one cluster
 	return cluster["Clusters"][0]["Id"] if len(cluster["Clusters"]) != 0 else None
 
 
 def create_emr(no_of_resources):
+
+	emr_clusterid = get_emr_status()
+	
+	if emr_clusterid != None:
+		flash("EMR Cluster already running. Can't create a new one.")
+		return
 
 	emr_client = boto3.client('emr')
 	instance_groups = []
@@ -323,9 +396,6 @@ def create_emr(no_of_resources):
          })
 		
 	 
-	global emr_clusterid
-	
-	
 	emr_clusterid = emr_client.run_job_flow(
 	      Name = "trading_risk_simulator_emrcluster",
 	      Instances = {
@@ -337,20 +407,96 @@ def create_emr(no_of_resources):
 	      JobFlowRole="EMR_EC2_DefaultRole",
 	      ReleaseLabel="emr-6.6.0",
 	      Applications= [{
-	         Name:"Spark",
-	         Version: "3.2.0"
-	      
-	      
+	         "Name":"Spark"
 	      }])
 	     
 	      
 	
 	print("EMR Startup Done!!")
-	print(emr_clusterid)
+	#print(emr_clusterid)
 	
 	emr_clusterid = emr_clusterid["JobFlowId"]
 	
+
+
+def get_data_fromS3():
+
+	s3_client = boto3.client('s3')
+
+	response = s3_client.list_objects_v2(Bucket="cloudcomputingcw", Prefix="output/")
+	csv_files = []
 	
+	#Flag variable for defining if the data is from Lambda or EMR, based on filename
+	#This will determine whether to average the values or combine them
+	isOutputFromLambda = True
+		
+	if "Contents" in response:
+	
+		contents = response["Contents"]
+		
+		for content in contents:
+		
+			output_key = content["Key"] 
+			
+			if "success" in output_key.lower():
+				continue
+
+			if "part" in output_key:
+				isOutputFromLambda = False
+		
+			response = s3_client.get_object(Bucket="cloudcomputingcw", Key=output_key)
+			payload = response["Body"].read()
+			
+			payload = pd.read_csv(BytesIO(payload))
+			csv_files.append(payload)
+			
+			print("{0} found in S3 Bucket. Adding....".format(output_key))
+				
+				
+				
+										
+		#Average the values	
+		if isOutputFromLambda:
+			
+			output_df = pd.DataFrame(columns=["Date", "Var95", "Var99", "AVG_Var95", "AVG_Var99"])
+			index = 0
+			max_length = len(csv_files[0])
+			while(max_length > index):				
+				var95 = []
+				var99 = []
+				
+				for csv in csv_files:
+					Date = csv.at[index, "Date"]
+					var95.append(csv.at[index, "var95"])
+					var99.append(csv.at[index, "var99"])	
+								
+				output_df.loc[index] = [Date, mean(var95), mean(var99), 0, 0]
+				index += 1
+			
+			output_df["AVG_Var95"] = mean(output_df["Var95"])
+			output_df["AVG_Var99"] = mean(output_df["Var99"])
+			print(output_df)
+			return output_df
+			
+			
+		#Append the files into one CSV	
+		else:
+			output_df = pd.DataFrame(columns=["Date", "Var95", "Var99"])
+			
+			for csv in csv_files:
+				output_df = pd.concat([output_df, csv[["Date", "Var95", "Var99"]]])
+				print(output_df)
+							
+						
+			output_df["AVG_Var95"] = mean(output_df["Var95"])
+			output_df["AVG_Var99"] = mean(output_df["Var99"])
+			output_df.sort_values(by='Date', inplace=True)
+			
+			print(output_df)
+			return output_df
+	else:
+		flash("No Risk data in S3 Bucket")
+		return None
 	
 	
 	
@@ -360,7 +506,11 @@ def parameters():
 	
 @bp.route('/output')
 def output_dashboard():
-	return render_template("/output.html", var95s=var95s, var99s=var99s)
+
+
+	data = get_data_fromS3()
+	
+	return render_template("/output.html", data=data.values.tolist())
 	
 @bp.route('/audit')
 def audit_dashboard():
