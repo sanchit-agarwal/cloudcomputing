@@ -1,0 +1,11 @@
+runtime: python39
+entrypoint: gunicorn -b :$PORT flaskr.init:app
+basic_scaling:
+ max_instances: 1
+ idle_timeout: 30m
+env_variables:
+ FLASK_APP: flaskr
+ FLASK_ENV: production
+ AWS_ACCESS_KEY_ID: ASIAYOER6CFKLWBVLEHQ
+ AWS_SECRET_ACCESS_KEY: FwoGZXIvYXdzEM7//////////wEaDGRBf4UqmmtHwwoXXyLFAfA/j4AHjeQ75h048YWMTE1TlsCA5dEa4FSN7FD+Izmo+sqvyDJnga7q/i4Jp4FnaOgjo6RXT//sxEQBoqpUiqitLAC06ZHxjhUjslID+xXCtWFxCILf4qZMiZFRsUO8IEFb9ztvtIOcdWzbhqWeSpbgeB13C/sCKNFf8ip0HZo2gdeyRvjELMUmRP3imxQWG1i8KPMJpbVCU0OQWX0tR7ETadeM5/fp3x2XuXLQBWb7QaIQLO4E+McLviyC1Opj43FWrVFAKNW+hZQGMi1q0ZdcTj60FLZO/a/TJ4d9j/ZWRfgmVdri9X2BngZdGCpHvkR9gh+E8fUH53k=
+ AWS_DEFAULT_REGION: us-east-1
