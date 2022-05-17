@@ -1,7 +1,5 @@
 sudo docker login -u AWS -p $(aws ecr get-login-password --region us-east-1) 580126642516.dkr.ecr.us-east-1.amazonaws.com
 aws ecr create-repository --repository-name cloud-computing-cw --image-scanning-configuration scanOnPush=true --image-tag-mutability MUTABLE
-sudo docker build -t hello-world .
-sudo docker tag hello-world:latest 580126642516.dkr.ecr.us-east-1.amazonaws.com/hello-world:latest
-sudo docker push 580126642516.dkr.ecr.us-east-1.amazonaws.com/hello-world:latest
-aws lambda create-function --region us-east-1 --function-name lambdacore --code ImageUri=580126642516.dkr.ecr.us-east-1.amazonaws.com/cloud-computing-cw:latest  --role arn:aws:iam::580126642516:instance-profile/LabInstanceProfile --runtime python3.9 --handler lambda_handler
-usr/local/bin/aws lambda create-function --region us-east-1 --function-name lambdacore --code ImageUri=580126642516.dkr.ecr.us-east-1.amazonaws.com/hello-world:latest --role arn:aws:iam::580126642516:role/LabRole --package-type Image
+sudo docker build -t lambda_core:2.0 .
+sudo docker tag lambda_core:2.0 580126642516.dkr.ecr.us-east-1.amazonaws.com/lambda_core:2.0 
+sudo docker push 580126642516.dkr.ecr.us-east-1.amazonaws.com/lambda_core:2.0 

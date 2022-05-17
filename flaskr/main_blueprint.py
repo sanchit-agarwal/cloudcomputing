@@ -70,7 +70,7 @@ def output_dashboard():
 
 	data = get_data_fromS3()
 	
-	if data is not None or len(data.values.tolist()) > 0:
+	if data is not None and len(data.values.tolist()) > 0:
 		data = data.values.tolist()
 	else:
 		data = [[]]
@@ -450,7 +450,6 @@ def get_emr_status(clusterstates=["WAITING","RUNNING","STARTING"]):
 	
 	cluster = emr_client.list_clusters(ClusterStates=clusterstates)
 	
-	#Assert only one cluster
 	return cluster["Clusters"][0]["Id"] if len(cluster["Clusters"]) != 0 else None
 	
 	
@@ -475,7 +474,7 @@ def capture_startup_time(clusterid):
 	write_log("Initialize", "EMR", final_time)
 
 
-def write_log(category, service_type, time, log_string=""):
+def write_log(category, service_type, time, log_string=" "):
 
 	#s3_client = boto3.client("s3")
 	auditFile = None

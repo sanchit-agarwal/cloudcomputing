@@ -45,6 +45,10 @@
 		   <form action="/terminate" method="post">
 		     <input type="submit" value="Terminate Resources" />
 		   </form>
+		   <form id="reset_analyis" action="/reset" method="post">
+ 			<input type="submit" value="Reset Analysis"/>
+		  </form>
+
 		 </header>
 		 
 		   {% for message in get_flashed_messages() %}
@@ -53,10 +57,7 @@
 		   {% block content %} {% endblock %}
 		</section>
         </div>
-	  
-	  
-	  
-	  
+	   
 	  </div>
 
      
